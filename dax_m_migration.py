@@ -1,18 +1,17 @@
 """
 DAX & M MIGRATION TOOL
-Version: 1.9.0
-Description: Unified Tab-based app with flexible Table Name recognition (quoted & unquoted).
+Version: 1.9.1
+Description: Global converter now detects M and DAX patterns simultaneously when in M mode.
 """
 
 import streamlit as st
 import pandas as pd
 import re
 
-# v1.9.0: Layout Setup
-st.set_page_config(page_title="Migration Pro v1.9", layout="wide")
+st.set_page_config(page_title="Migration Pro v1.9.1", layout="wide")
 
 st.title("🔄 Power BI Migration Toolkit")
-st.caption("Version 1.9.0 | Flexible Table Recognition")
+st.caption("Version 1.9.1 | M & Embedded DAX Support")
 
 # --- SIDEBAR: GLOBAL UPLOAD ---
 st.sidebar.header("1. Global Mapping Upload")
@@ -37,6 +36,7 @@ tab1, tab2, tab3 = st.tabs(["🚀 Full Script Converter", "🛠️ M-Script Step
 # --- TAB 1: FULL SCRIPT CONVERTER ---
 with tab1:
     st.subheader("Global Find-and-Replace")
+    st.markdown("_Note: M Mode now automatically detects embedded DAX patterns._")
     script_type = st.radio("Target Syntax Mode:", ["DAX", "M (Power Query)"], horizontal=True, key="full_mode")
     
     col1, col2 = st.columns(2)
@@ -51,26 +51,34 @@ with tab1:
                 nt, nf = str(row.get('NewTable', '')), str(row.get('NewField', ''))
                 
                 if ot and of and nt and nf:
-                    # Target Syntax (Standardized with quotes)
-                    new = f"'{nt}'[{nf}]" if script_type == "DAX" else f'#"{nt}"["{nf}"]'
+                    # Define what the NEW reference should look like based on mode
+                    new_m = f'#"{nt}"["{nf}"]'
+                    new_dax = f"'{nt}'[{nf}]"
                     
-                    # Match Option 1: Quoted
-                    old_quoted = f"'{ot}'[{of}]" if script_type == "DAX" else f'#"{ot}"["{of}"]'
-                    all_mappings.append({'old': old_quoted, 'new': new, 'len': len(old_quoted)})
+                    # Logic: If in M Mode, we must search for BOTH M and DAX patterns
+                    # If in DAX Mode, we only search for DAX patterns
                     
-                    # Match Option 2: Unquoted (Only if DAX)
-                    if script_type == "DAX":
-                        old_unquoted = f"{ot}[{of}]"
-                        all_mappings.append({'old': old_unquoted, 'new': new, 'len': len(old_unquoted)})
+                    # 1. M Patterns
+                    if script_type == "M (Power Query)":
+                        m_old = f'#"{ot}"["{of}"]'
+                        all_mappings.append({'old': m_old, 'new': new_m, 'len': len(m_old)})
+                    
+                    # 2. DAX Patterns (Quoted)
+                    dax_quoted_old = f"'{ot}'[{of}]"
+                    target_dax = new_dax if script_type == "DAX" else new_m # Ensure we don't mix syntaxes in output
+                    all_mappings.append({'old': dax_quoted_old, 'new': target_dax, 'len': len(dax_quoted_old)})
+                    
+                    # 3. DAX Patterns (Unquoted)
+                    dax_unquoted_old = f"{ot}[{of}]"
+                    all_mappings.append({'old': dax_unquoted_old, 'new': target_dax, 'len': len(dax_unquoted_old)})
                 
+                # Table-Only Logic
                 elif ot and nt and not of:
-                    new = f"'{nt}'" if script_type == "DAX" else f'#"{nt}"'
-                    all_mappings.append({'old': f"'{ot}'", 'new': new, 'len': len(f"'{ot}'")})
-                    if script_type == "DAX":
-                        all_mappings.append({'old': ot, 'new': new, 'len': len(ot)})
-                
-                elif of and nf and not ot:
-                    all_mappings.append({'old': f"[{of}]", 'new': f"[{nf}]", 'len': len(f"[{of}]")})
+                    if script_type == "M (Power Query)":
+                        all_mappings.append({'old': f'#"{ot}"', 'new': f'#"{nt}"', 'len': len(f'#"{ot}"')})
+                    
+                    all_mappings.append({'old': f"'{ot}'", 'new': f"'{nt}'", 'len': len(f"'{ot}'")})
+                    all_mappings.append({'old': ot, 'new': nt, 'len': len(ot)})
 
             # Sort by length descending to ensure specific matches happen before broad ones
             sorted_map = sorted(all_mappings, key=lambda x: x['len'], reverse=True)
@@ -120,8 +128,10 @@ with tab3:
             preview_data.append({
                 "Old Table": row.get('OldTable'),
                 "Old Field": row.get('OldField'),
+                "M Syntax": f'#"{row.get("OldTable")}"["{row.get("OldField")}"]' if row.get("OldTable") else "",
                 "DAX (Quoted)": f"'{row.get('OldTable')}'[{row.get('OldField')}]" if row.get('OldTable') and row.get('OldField') else "",
                 "DAX (Unquoted)": f"{row.get('OldTable')}[{row.get('OldField')}]" if row.get('OldTable') and row.get('OldField') else "",
-                "New Reference": f"'{row.get('NewTable')}'[{row.get('NewField')}]" if row.get('NewTable') and row.get('NewField') else ""
+                "New Table": row.get('NewTable'),
+                "New Field": row.get('NewField')
             })
         st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
