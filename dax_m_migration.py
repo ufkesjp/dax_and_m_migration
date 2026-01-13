@@ -1,20 +1,18 @@
 """
 DAX & M MIGRATION TOOL
-Version: 2.0.0
-Description: Unified Tab-based app. 
-- Dax Measure Converter: Handles quoted/unquoted DAX references.
-- M-Script Step Injector: Handles Power Query source-level renames.
+Version: 1.9.0
+Description: Unified Tab-based app with flexible Table Name recognition (quoted & unquoted).
 """
 
 import streamlit as st
 import pandas as pd
 import re
 
-# v2.0.0: UI Layout Setup
-st.set_page_config(page_title="DAX & M Migration v2.0", layout="wide")
+# v1.9.0: Layout Setup
+st.set_page_config(page_title="Migration Pro v1.9", layout="wide")
 
 st.title("🔄 Power BI Migration Toolkit")
-st.caption("Version 2.0.0 | Focused Tools")
+st.caption("Version 1.9.0 | Flexible Table Recognition")
 
 # --- SIDEBAR: GLOBAL UPLOAD ---
 st.sidebar.header("1. Global Mapping Upload")
@@ -33,26 +31,17 @@ def get_mapping_data(file):
 
 df_map = get_mapping_data(mapping_file)
 
-if df_map is not None:
-    st.sidebar.success(f"✅ Mapping Active ({len(df_map)} rows)")
-else:
-    st.sidebar.info("Awaiting CSV upload...")
-
 # --- TABS SETUP ---
-tab1, tab2, tab3 = st.tabs([
-    "🚀 Dax Measure Converter", 
-    "🛠️ M-Script Step Injector", 
-    "🔍 Mapping Previewer"
-])
+tab1, tab2, tab3 = st.tabs(["🚀 Full Script Converter", "🛠️ M-Script Step Injector", "🔍 Mapping Previewer"])
 
-# --- TAB 1: DAX MEASURE CONVERTER ---
+# --- TAB 1: FULL SCRIPT CONVERTER ---
 with tab1:
-    st.subheader("DAX Find-and-Replace")
-    st.caption("Replaces table/field references. Automatically detects 'Table'[Field] and Table[Field].")
+    st.subheader("Global Find-and-Replace")
+    script_type = st.radio("Target Syntax Mode:", ["DAX", "M (Power Query)"], horizontal=True, key="full_mode")
     
     col1, col2 = st.columns(2)
     with col1:
-        source_text = st.text_area("Paste DAX Script", height=450, key="dax_conv_input")
+        source_text = st.text_area("Paste Old Script", height=400, key="full_conv_input")
     
     with col2:
         if df_map is not None and source_text:
@@ -61,21 +50,25 @@ with tab1:
                 ot, of = str(row.get('OldTable', '')), str(row.get('OldField', ''))
                 nt, nf = str(row.get('NewTable', '')), str(row.get('NewField', ''))
                 
-                # New Target Syntax (Standardized with quotes)
-                new_ref = f"'{nt}'[{nf}]" if nt and nf else f"'{nt}'" if nt else f"[{nf}]"
+                if ot and of and nt and nf:
+                    # Target Syntax (Standardized with quotes)
+                    new = f"'{nt}'[{nf}]" if script_type == "DAX" else f'#"{nt}"["{nf}"]'
+                    
+                    # Match Option 1: Quoted
+                    old_quoted = f"'{ot}'[{of}]" if script_type == "DAX" else f'#"{ot}"["{of}"]'
+                    all_mappings.append({'old': old_quoted, 'new': new, 'len': len(old_quoted)})
+                    
+                    # Match Option 2: Unquoted (Only if DAX)
+                    if script_type == "DAX":
+                        old_unquoted = f"{ot}[{of}]"
+                        all_mappings.append({'old': old_unquoted, 'new': new, 'len': len(old_unquoted)})
                 
-                # Scenario: Table and Field
-                if ot and of:
-                    # Match both 'Table'[Field] and Table[Field]
-                    all_mappings.append({'old': f"'{ot}'[{of}]", 'new': new_ref, 'len': len(f"'{ot}'[{of}]")})
-                    all_mappings.append({'old': f"{ot}[{of}]", 'new': new_ref, 'len': len(f"{ot}[{of}]")})
-                
-                # Scenario: Table Only rename
                 elif ot and nt and not of:
-                    all_mappings.append({'old': f"'{ot}'", 'new': f"'{nt}'", 'len': len(f"'{ot}'")})
-                    all_mappings.append({'old': ot, 'new': f"'{nt}'", 'len': len(ot)})
+                    new = f"'{nt}'" if script_type == "DAX" else f'#"{nt}"'
+                    all_mappings.append({'old': f"'{ot}'", 'new': new, 'len': len(f"'{ot}'")})
+                    if script_type == "DAX":
+                        all_mappings.append({'old': ot, 'new': new, 'len': len(ot)})
                 
-                # Scenario: Field Only rename
                 elif of and nf and not ot:
                     all_mappings.append({'old': f"[{of}]", 'new': f"[{nf}]", 'len': len(f"[{of}]")})
 
@@ -86,31 +79,24 @@ with tab1:
             for item in sorted_map:
                 converted_script = converted_script.replace(item['old'], item['new'])
             
-            st.code(converted_script, language='sql')
-            st.download_button("Download DAX Script", converted_script, "converted_dax.txt")
+            st.code(converted_script, language='sql' if script_type == "DAX" else 'powerquery')
+            st.download_button("Download Script", converted_script, "converted_full.txt")
         else:
-            st.info("Upload CSV in sidebar and paste DAX to start.")
+            st.info("Upload CSV in sidebar and paste script to begin.")
 
 # --- TAB 2: M-SCRIPT STEP INJECTOR ---
 with tab2:
     st.subheader("M-Script Source Step Injector")
-    st.caption("Injects Table.RenameColumns after the first detected step in Power Query.")
-
     col1, col2 = st.columns(2)
     with col1:
-        m_script = st.text_area("Paste M Script from Advanced Editor", height=450, key="m_inj_input")
-
+        m_script = st.text_area("Paste M Script", height=400, key="m_inj_input")
     with col2:
         if df_map is not None and m_script:
-            # Build the rename list from the shared mapping
             rename_list = [f'{{"{r.OldField}", "{r.NewField}"}}' for r in df_map.itertuples() if r.OldField and r.NewField]
-
             if rename_list:
                 lines = m_script.split('\n')
                 new_lines, first_step_name, injected = [], None, False
-                # Captures step names like #"Source" or Source
                 step_pattern = r'^\s*(#"[^"]+"|\w+)\s*='
-
                 for line in lines:
                     new_lines.append(line)
                     if not first_step_name:
@@ -120,20 +106,10 @@ with tab2:
                             new_lines.append(f'    RenamedColumns = Table.RenameColumns({first_step_name}, {{{", ".join(rename_list)}}}),')
                             injected = True
                             continue 
-
                     if injected and first_step_name in line:
-                        # Re-link the subsequent step to point to RenamedColumns
                         line = line.replace(f"({first_step_name})", "(RenamedColumns)").replace(f"{first_step_name},", "RenamedColumns,")
                         new_lines[-1] = line
-
-                final_m = "\n".join(new_lines)
-                st.success(f"Injected after step: `{first_step_name}`")
-                st.code(final_m, language='powerquery')
-                st.download_button("Download M Script", final_m, "injected_m.txt")
-            else:
-                st.error("No valid Field renames (OldField -> NewField) found in mapping.")
-        else:
-            st.warning("Upload CSV in sidebar and paste an M script.")
+                st.code("\n".join(new_lines), language='powerquery')
 
 # --- TAB 3: MAPPING PREVIEWER ---
 with tab3:
@@ -141,17 +117,11 @@ with tab3:
     if df_map is not None:
         preview_data = []
         for _, row in df_map.iterrows():
-            ot, of = str(row.get('OldTable', '')), str(row.get('OldField', ''))
-            nt, nf = str(row.get('NewTable', '')), str(row.get('NewField', ''))
-            
             preview_data.append({
-                "Old Table": ot,
-                "Old Field": of,
-                "Pattern (Quoted)": f"'{ot}'[{of}]" if ot and of else f"'{ot}'" if ot else f"[{of}]",
-                "Pattern (Unquoted)": f"{ot}[{of}]" if ot and of else ot if ot else f"[{of}]",
-                "New Reference": f"'{nt}'[{nf}]" if nt and nf else f"'{nt}'" if nt else f"[{nf}]"
+                "Old Table": row.get('OldTable'),
+                "Old Field": row.get('OldField'),
+                "DAX (Quoted)": f"'{row.get('OldTable')}'[{row.get('OldField')}]" if row.get('OldTable') and row.get('OldField') else "",
+                "DAX (Unquoted)": f"{row.get('OldTable')}[{row.get('OldField')}]" if row.get('OldTable') and row.get('OldField') else "",
+                "New Reference": f"'{row.get('NewTable')}'[{row.get('NewField')}]" if row.get('NewTable') and row.get('NewField') else ""
             })
-
         st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
-    else:
-        st.info("Upload a CSV in the sidebar to see the logic preview.")
