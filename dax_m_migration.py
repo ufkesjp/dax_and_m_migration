@@ -36,7 +36,7 @@ tab1, tab2, tab3 = st.tabs(["🚀 DAX and M Converter", "🛠️ Add Rename Step
 # --- TAB 1: FULL SCRIPT CONVERTER ---
 with tab1:
     st.subheader("Global Find-and-Replace")
-    st.markdown("The M conversion is currently struggling since there is embedded DAX")
+    st.markdown("The M conversion is currently struggling since DAX can be embedded in the M Scripts.")
     script_type = st.radio("Target Syntax Mode:", ["DAX", "M (Power Query)"], horizontal=True, key="full_mode")
     
     col1, col2 = st.columns(2)
