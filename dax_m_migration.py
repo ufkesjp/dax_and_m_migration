@@ -1,115 +1,159 @@
 """
 DAX & M MIGRATION TOOL
-Version: 1.3.0
-Description: Converts DAX/M scripts using a CSV mapping file.
-Schema: OldTable, OldField, NewTable, NewField
+Version: 1.8.0
+Description: Unified Tab-based app with shared sidebar uploader and Mapping Previewer.
 """
 
 import streamlit as st
 import pandas as pd
+import re
 
-# v1.3.0: Page config and versioning
-st.set_page_config(page_title="DAX & M Migration v1.3", layout="wide")
-st.title("🔄 DAX & M Migration")
-st.caption("Version 1.3.0 | Stable")
+# v1.8.0: Layout Setup
+st.set_page_config(page_title="Migration Pro v1.8", layout="wide")
 
-# Initialize variables to prevent "unbound" errors
-all_mappings = []
+st.title("🔄 Power BI Migration Toolkit")
+st.caption("Version 1.8.0 | Shared Mapping System")
 
-# --- SIDEBAR: CONFIGURATION ---
-st.sidebar.header("1. Configuration")
+# --- SIDEBAR: GLOBAL UPLOAD ---
+st.sidebar.header("1. Global Mapping Upload")
 mapping_file = st.sidebar.file_uploader("Upload Mapping CSV", type="csv")
-script_type = st.sidebar.selectbox("Script Type", ["DAX", "M (Power Query)"])
 
-# --- CORE ENGINE: SYNTAX GENERATOR ---
-def get_replacement_pairs(df, mode):
-    """
-    v1.1.0: Logic to generate correct syntax strings based on language mode.
-    Handles Table+Field, Table-only, and Field-only scenarios.
-    """
-    pairs = []
-    for _, row in df.iterrows():
-        # Using .get() and stripping to handle whitespace/missing headers
-        ot = str(row.get('OldTable', '')).strip()
-        of = str(row.get('OldField', '')).strip()
-        nt = str(row.get('NewTable', '')).strip()
-        nf = str(row.get('NewField', '')).strip()
+# Helper to load mapping once per rerun
+def get_mapping_data(file):
+    if file:
+        try:
+            df = pd.read_csv(file).fillna('')
+            df.columns = [c.strip() for c in df.columns]
+            return df
+        except Exception as e:
+            st.sidebar.error(f"Error reading CSV: {e}")
+            return None
+    return None
 
-        # Handle 'nan' strings that result from empty pandas cells
-        ot = "" if ot.lower() == 'nan' else ot
-        of = "" if of.lower() == 'nan' else of
-        nt = "" if nt.lower() == 'nan' else nt
-        nf = "" if nf.lower() == 'nan' else nf
+df_map = get_mapping_data(mapping_file)
 
-        # Scenario A: Table and Field both change
-        if ot and of and nt and nf:
-            old = f"'{ot}'[{of}]" if mode == "DAX" else f'#"{ot}"["{of}"]'
-            new = f"'{nt}'[{nf}]" if mode == "DAX" else f'#"{nt}"["{nf}"]'
-        
-        # Scenario B: Table-wide rename
-        elif ot and nt and not of and not nf:
-            old = f"'{ot}'" if mode == "DAX" else f'#"{ot}"'
-            new = f"'{nt}'" if mode == "DAX" else f'#"{nt}"'
+if df_map is not None:
+    st.sidebar.success(f"✅ Mapping Active ({len(df_map)} rows)")
+else:
+    st.sidebar.info("Awaiting CSV upload...")
+
+# --- TABS SETUP ---
+tab1, tab2, tab3 = st.tabs([
+    "🚀 Full Script Converter", 
+    "🛠️ M-Script Step Injector", 
+    "🔍 Mapping Previewer"
+])
+
+# --- TAB 1: FULL SCRIPT CONVERTER ---
+with tab1:
+    st.subheader("Global Find-and-Replace")
+    st.caption("v1.5.0 Logic: Replaces every instance of a reference throughout the script.")
+
+    script_type = st.radio("Target Syntax Mode:", ["DAX", "M (Power Query)"], horizontal=True, key="full_mode")
+    
+    col1, col2 = st.columns(2)
+    with col1:
+        source_text = st.text_area("Paste Old Script", height=400, key="full_conv_input")
+    
+    with col2:
+        if df_map is not None and source_text:
+            all_mappings = []
+            for _, row in df_map.iterrows():
+                ot, of = str(row.get('OldTable', '')), str(row.get('OldField', ''))
+                nt, nf = str(row.get('NewTable', '')), str(row.get('NewField', ''))
+                
+                if ot and of and nt and nf:
+                    old = f"'{ot}'[{of}]" if script_type == "DAX" else f'#"{ot}"["{of}"]'
+                    new = f"'{nt}'[{nf}]" if script_type == "DAX" else f'#"{nt}"["{nf}"]'
+                    all_mappings.append({'old': old, 'new': new, 'len': len(old)})
+                elif ot and nt and not of:
+                    old = f"'{ot}'" if script_type == "DAX" else f'#"{ot}"'
+                    new = f"'{nt}'" if script_type == "DAX" else f'#"{nt}"'
+                    all_mappings.append({'old': old, 'new': new, 'len': len(old)})
+                elif of and nf and not ot:
+                    all_mappings.append({'old': f"[{of}]", 'new': f"[{nf}]", 'len': len(f"[{of}]")})
+
+            sorted_map = sorted(all_mappings, key=lambda x: x['len'], reverse=True)
+            converted_script = source_text
+            for item in sorted_map:
+                converted_script = converted_script.replace(item['old'], item['new'])
             
-        # Scenario C: Field-wide rename
-        elif of and nf and not ot and not nt:
-            old = f"[{of}]"
-            new = f"[{nf}]"
+            st.code(converted_script, language='sql' if script_type == "DAX" else 'powerquery')
+            st.download_button("Download Script", converted_script, "converted_full.txt")
         else:
-            continue
-            
-        pairs.append({'Old Syntax': old, 'New Syntax': new, 'len': len(old)})
-    return pairs
+            st.warning("Upload CSV in sidebar and paste script to start.")
 
-# --- PREVIEW SECTION ---
-if mapping_file:
-    try:
-        # Load mapping and fill empty cells to avoid processing issues
-        df_raw = pd.read_csv(mapping_file).fillna('')
-        all_mappings = get_replacement_pairs(df_raw, script_type)
-        
-        if all_mappings:
-            preview_df = pd.DataFrame(all_mappings).drop(columns=['len'])
-            with st.expander("🔍 Mapping Preview & Search"):
-                search_term = st.text_input("Filter mappings...", "")
-                if search_term:
-                    preview_df = preview_df[preview_df['Old Syntax'].str.contains(search_term, case=False)]
-                st.dataframe(preview_df, use_container_width=True)
+# --- TAB 2: M-SCRIPT STEP INJECTOR ---
+with tab2:
+    st.subheader("M-Script Source Step Injector")
+    st.caption("v1.5.0 Logic: Injects Table.RenameColumns after the first detected step.")
+
+    col1, col2 = st.columns(2)
+    with col1:
+        m_script = st.text_area("Paste M Script from Advanced Editor", height=400, key="m_inj_input")
+
+    with col2:
+        if df_map is not None and m_script:
+            rename_list = [f'{{"{r.OldField}", "{r.NewField}"}}' for r in df_map.itertuples() if r.OldField and r.NewField]
+
+            if rename_list:
+                lines = m_script.split('\n')
+                new_lines, first_step_name, injected = [], None, False
+                step_pattern = r'^\s*(#"[^"]+"|\w+)\s*='
+
+                for line in lines:
+                    new_lines.append(line)
+                    if not first_step_name:
+                        match = re.search(step_pattern, line)
+                        if match:
+                            first_step_name = match.group(1)
+                            new_lines.append(f'    RenamedColumns = Table.RenameColumns({first_step_name}, {{{", ".join(rename_list)}}}),')
+                            injected = True
+                            continue 
+                    if injected and first_step_name in line:
+                        line = line.replace(f"({first_step_name})", "(RenamedColumns)").replace(f"{first_step_name},", "RenamedColumns,")
+                        new_lines[-1] = line
+
+                final_m = "\n".join(new_lines)
+                st.success(f"Injected after step: `{first_step_name}`")
+                st.code(final_m, language='powerquery')
+                st.download_button("Download Injected M", final_m, "injected_m.txt")
+            else:
+                st.error("No valid Field renames found in mapping.")
         else:
-            st.warning("No valid mappings found. Please check your CSV headers.")
+            st.warning("Upload CSV in sidebar and paste M script.")
+
+# --- TAB 3: MAPPING PREVIEWER ---
+with tab3:
+    st.subheader("Mapping Logic Preview")
+    st.markdown("See how your CSV rows are translated into specific code syntax.")
+
+    if df_map is not None:
+        # Generate a quick preview of both syntaxes simultaneously for the user
+        preview_data = []
+        for _, row in df_map.iterrows():
+            ot, of = str(row.get('OldTable', '')), str(row.get('OldField', ''))
+            nt, nf = str(row.get('NewTable', '')), str(row.get('NewField', ''))
             
-    except Exception as e:
-        st.error(f"CSV Error: Ensure headers are OldTable, OldField, NewTable, NewField.")
+            if ot and of:
+                dax_old = f"'{ot}'[{of}]"
+                m_old = f'#"{ot}"["{of}"]'
+            elif ot:
+                dax_old = f"'{ot}'"
+                m_old = f'#"{ot}"'
+            else:
+                dax_old = f"[{of}]"
+                m_old = f"[{of}]"
 
-# --- MAIN UI: SCRIPT CONVERSION ---
-col1, col2 = st.columns(2)
+            preview_data.append({
+                "Source Table": ot,
+                "Source Field": of,
+                "DAX Syntax (Old)": dax_old,
+                "M Syntax (Old)": m_old,
+                "Target Table": nt,
+                "Target Field": nf
+            })
 
-with col1:
-    st.subheader("Source Script")
-    source_script = st.text_area("Paste Old Script", height=500, placeholder="Paste your DAX or M code here...")
-
-with col2:
-    st.subheader("Converted Output")
-    # Only run if mapping file is uploaded, mappings generated, and script exists
-    if mapping_file and all_mappings and source_script:
-        # v1.0.0: Sort by length descending to prevent sub-string collision errors
-        sorted_map = sorted(all_mappings, key=lambda x: x['len'], reverse=True)
-        converted_script = source_script
-        
-        replace_count = 0
-        for item in sorted_map:
-            if item['Old Syntax'] in converted_script:
-                count = converted_script.count(item['Old Syntax'])
-                converted_script = converted_script.replace(item['Old Syntax'], item['New Syntax'])
-                replace_count += count
-        
-        st.success(f"Conversion complete! Found and replaced {replace_count} references.")
-        st.code(converted_script, language='sql' if script_type == "DAX" else 'powerquery')
-        
-        st.download_button(
-            label="Download Script", 
-            data=converted_script, 
-            file_name=f"converted_{script_type.lower().replace(' ', '_')}.txt"
-        )
+        st.dataframe(pd.DataFrame(preview_data), use_container_width=True)
     else:
-        st.info("Upload CSV and paste script to begin.")
+        st.info("Upload a CSV in the sidebar to see the logic preview.")
