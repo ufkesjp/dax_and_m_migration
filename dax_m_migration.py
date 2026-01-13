@@ -8,7 +8,7 @@ import streamlit as st
 import pandas as pd
 import re
 
-st.set_page_config(page_title="Migration Pro v1.9.1", layout="wide")
+st.set_page_config(page_title="Migration Tool v1.9.1", layout="wide")
 
 st.title("🔄 Power BI Migration Toolkit")
 st.caption("Version 1.9.1 | M & Embedded DAX Support")
@@ -31,12 +31,11 @@ def get_mapping_data(file):
 df_map = get_mapping_data(mapping_file)
 
 # --- TABS SETUP ---
-tab1, tab2, tab3 = st.tabs(["🚀 Full Script Converter", "🛠️ M-Script Step Injector", "🔍 Mapping Previewer"])
+tab1, tab2, tab3 = st.tabs(["🚀 DAX and M Converter", "🛠️ Add Rename Step to M", "🔍 Mapping Previewer"])
 
 # --- TAB 1: FULL SCRIPT CONVERTER ---
 with tab1:
     st.subheader("Global Find-and-Replace")
-    st.markdown("_Note: M Mode now automatically detects embedded DAX patterns._")
     script_type = st.radio("Target Syntax Mode:", ["DAX", "M (Power Query)"], horizontal=True, key="full_mode")
     
     col1, col2 = st.columns(2)
