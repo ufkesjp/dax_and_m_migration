@@ -1,8 +1,8 @@
 """
 DAX & M MIGRATION TOOL
-Version: 2.1.5
+Version: 2.2.0
 Description: Unified Tab-based app. 
-DAX Measure Definer now uses a dedicated CSV upload for stability.
+Added optional mapping toggle for the DAX Measure Definer.
 """
 
 import streamlit as st
@@ -11,14 +11,13 @@ from io import StringIO
 import re
 
 # --- UI CONFIGURATION ---
-st.set_page_config(page_title="Migration Pro v2.1.5", layout="wide")
+st.set_page_config(page_title="Migration Pro v2.2.0", layout="wide")
 
 st.title("🔄 Power BI Migration Toolkit")
-st.caption("Version 2.1.5 | CSV-Based Measure Definition")
+st.caption("Version 2.2.0 | Optional Mapping Logic")
 
 # --- SIDEBAR: GLOBAL MAPPING UPLOAD ---
 st.sidebar.header("1. Global Mapping Upload")
-st.sidebar.markdown("Upload the file that defines your Table/Field renames.")
 mapping_file = st.sidebar.file_uploader("Upload Mapping CSV", type="csv", key="global_map")
 
 def get_mapping_data(file):
@@ -69,6 +68,8 @@ with tabs[0]:
     if source_text and df_map is not None:
         converted = apply_dax_mapping(source_text, df_map)
         st.code(converted, language='sql')
+    elif source_text:
+        st.warning("Upload mapping in sidebar to perform conversion.")
 
 # --- TAB 2: M-SCRIPT STEP INJECTOR ---
 with tabs[1]:
@@ -97,54 +98,54 @@ with tabs[1]:
 # --- TAB 3: DAX MEASURE DEFINER ---
 with tabs[2]:
     st.subheader("Bulk Measure Definer (INFO.MEASURES CSV)")
-    st.markdown("""
-    **Instructions:**
-    1. Export your `EVALUATE INFO.MEASURES()` results as a **CSV** from DAX Studio.
-    2. Upload that CSV below.
-    3. Ensure the CSV contains columns named **Name** and **Expression**.
-    """)
     
-    target_table = st.text_input("Assign to Table", value="Measures_Table")
+    col1, col2 = st.columns([2, 1])
+    with col1:
+        target_table = st.text_input("Assign to Table in New Model", value="Measures_Table")
+    with col2:
+        st.write("##") # Spacer
+        use_mapping = st.checkbox("Apply Global Mapping", value=True, help="If unchecked, measures will be defined exactly as they appear in the CSV.")
+    
     info_file = st.file_uploader("Upload INFO.MEASURES CSV", type="csv", key="info_measures_upload")
     
-    if info_file and df_map is not None:
+    if info_file:
         try:
-            # Read the uploaded INFO.MEASURES file
             info_df = pd.read_csv(info_file).fillna('')
-            
-            # Clean headers (strip brackets and spaces)
             info_df.columns = [c.replace('[', '').replace(']', '').strip() for c in info_df.columns]
             
-            # Identify columns
             name_col = next((c for c in info_df.columns if 'name' in c.lower()), None)
             expr_col = next((c for c in info_df.columns if 'expression' in c.lower() or 'formula' in c.lower()), None)
             
             if name_col and expr_col:
                 define_lines = ["DEFINE"]
                 
-                for _, row in info_df.iterrows():
-                    m_name = str(row[name_col]).strip()
-                    m_expr = str(row[expr_col]).strip()
-                    
-                    if not m_expr or m_expr.lower() in ['nan', 'null', '']:
-                        continue
+                # Check if mapping is requested but file is missing
+                if use_mapping and df_map is None:
+                    st.error("Mapping is enabled, but no Global Mapping CSV was uploaded in the sidebar.")
+                else:
+                    for _, row in info_df.iterrows():
+                        m_name = str(row[name_col]).strip()
+                        m_expr = str(row[expr_col]).strip()
                         
-                    mapped_expr = apply_dax_mapping(m_expr, df_map)
-                    define_lines.append(f"MEASURE '{target_table}'[{m_name}] = \n    {mapped_expr}\n")
-                
-                define_lines.append("EVALUATE")
-                define_lines.append(f"ROW(\"Status\", \"{len(define_lines)-3} Measures Defined\")")
-                
-                final_script = "\n".join(define_lines)
-                st.success(f"✅ Generated {len(define_lines)-3} measure definitions.")
-                st.code(final_script, language='sql')
-                st.download_button("Download DEFINE Script", final_script, "bulk_define.dax")
+                        if not m_expr or m_expr.lower() in ['nan', 'null', '']:
+                            continue
+                        
+                        # Apply mapping only if the toggle is ON
+                        final_expr = apply_dax_mapping(m_expr, df_map) if use_mapping else m_expr
+                        
+                        define_lines.append(f"MEASURE '{target_table}'[{m_name}] = \n    {final_expr}\n")
+                    
+                    define_lines.append("EVALUATE")
+                    define_lines.append(f"ROW(\"Status\", \"{len(define_lines)-3} Measures Defined\")")
+                    
+                    final_script = "\n".join(define_lines)
+                    st.success(f"✅ Generated {len(define_lines)-3} measure definitions (Mapping: {'ON' if use_mapping else 'OFF'}).")
+                    st.code(final_script, language='sql')
+                    st.download_button("Download DEFINE Script", final_script, "bulk_define.dax")
             else:
                 st.error(f"Required columns not found. Detected: {list(info_df.columns)}")
         except Exception as e:
             st.error(f"Error processing INFO.MEASURES file: {e}")
-    elif info_file and df_map is None:
-        st.warning("Please upload your Global Mapping CSV in the sidebar first.")
 
 # --- TAB 4: MAPPING PREVIEWER ---
 with tabs[3]:
